@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ title }}</title>
+  <script src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.bundle.min.js'></script>
+</head>
+
+<body>
+  <center>
+    <h1>{{ title }}</h1>
+    <p>Benford's law is an observation about the frequency distribution of leading digits in many real-life sets of numerical data. The law states that in many naturally occurring collections of numbers, the leading significant digit is likely to be small.
+      You can upload a set of data then select a valid column with numerical data, and see how your data set compares to Benford's Law.  Or you can select a previously submitted set of data, and see how it compared</p>
+  <center>
+    <label for="fileUpload">Select a File: </label>
+    <input type='file' id="fileUpload" size="60" onchange='handleFile()' />
+    <p id='errorText' style='color: red; display: none;'>This file has no numeric columns or is not a flat file, please resubmit</p>
+    <br/><br/>
+    <div id="databaseDataDiv">
+      <p>OR</p>
+      <br/><br/>
+      <label for="previousUploadSelect">Select a Previously Submitted File: </label>
+      <select id='previousUploadSelect'></select>
+      <button onclick='graphData("previous")'>Fetch Graph</button>
+    </div>
+  </center>
+  <center>
+      <div id='headerSelectDiv'>
+        <label for='headerSelect'>Select neccesary header</label>
+        <select id='headerSelect'></select>
+        <br/>
+        <button onclick='graphData("new")'>Graph Data</button>
+      </div>
+  </center>
+  <center>
+    <div class="chart-container" style="position: relative; height:40vh; width:80vw">
+      <canvas id="chart"></canvas>
+    </div>
+  </center>
+</body>
+</html>
+
+<script>
+  // INIT VALUES
+  document.getElementById("headerSelectDiv").style.display = "none";
+  // Init the data to graph, this will be populated after file upload
+  let dataToGraph = [];
+  let maxData = 0;
+  let previousData;
+  let fileName = '';
+  // When app loads, fetch our db.
+  fetch('http://localhost:5000/charts').then((res) => res.json()).then((res) => {
+      var previousUploadSelect = document.getElementById('previousUploadSelect');
+      previousData = res.data
+      if(previousData.length === 0) {
+        document.getElementById('databaseDataDiv').style.display = 'none';
+      } else {
+        res.data.map((d, index) => {
+        let option = document.createElement("option");
+        option.text = d[0];
+        option.value = index;
+        previousUploadSelect.add(option);
+      })
+      }
+     
+  })
+
+
+   function handleFile() {
+      document.getElementById('databaseDataDiv').style.display = 'none';
+       let file = document.getElementById("fileUpload").files[0];
+       if (file) {
+          fileName = file.name;
+          let reader = new FileReader();
+          reader.readAsText(file, "UTF-8");
+          reader.onload = function (evt) {
+              let rows = evt.target.result.split('\n');
+              rows = rows.map((row) => {
+                  return row.split('\t');
+              })
+              maxData = rows.length;
+              dataToGraph = rows;
+              var headerSelect = document.getElementById("headerSelect");
+              let optionCount = 0;
+              rows[0].map((header, index) => {
+                if(!isNaN(rows[1][index]) && !isNaN(rows[2][index])){
+                  // Checks if the first and second row for this header is indeed a number, if not dont add the option
+                  let option = document.createElement("option");
+                  option.text = header;
+                  option.value = index;
+                  headerSelect.add(option);
+                  optionCount++;
+                }
+              })
+              if(optionCount > 0){
+                document.getElementById("headerSelectDiv").style.display = "block";
+                document.getElementById('errorText').style.display = 'none';
+              }
+              else 
+              document.getElementById('errorText').style.display = 'block';
+          }
+          reader.onerror = function (evt) {
+              console.log('err, bad row');
+          }
+      } else {
+          console.log('No File');
+      }
+   }
+
+   function graphData(fileType) {
+       let resultMapper = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0, 9: 0};
+        // IF new data, populate from file else from db data
+        if(fileType === 'new') {
+          // header index is the column we care about, so only grab that column from each row
+          let headerIndex = document.getElementById("headerSelect").value;
+           let header = dataToGraph[0][headerIndex];
+          dataToGraph.map((data, i) => {
+            // skip headers
+            if(i !== 0) {
+              try {
+                // Only increment if its a number ( all our keys are the numbers, so we can just check if the key exists )
+                let firstDigit = data[headerIndex][0];
+                if(resultMapper[firstDigit] !== undefined) resultMapper[firstDigit]++; 
+               } catch (err) {
+                   // Bad data, probably not seperated correctly, or not a number.. Will add on to this later. 
+                   console.log(err);
+               }
+                
+            }
+          })
+        } else {
+          // old file type, retrieved from db.
+          selectedIndex = document.getElementById('previousUploadSelect').value;
+          let selectedValue = previousData[selectedIndex];
+          maxData = 0;
+          Object.keys(resultMapper).map((i) => {
+            // maxData is the sum of all the values.
+            maxData += selectedValue[i];
+            resultMapper[i] = selectedValue[i]
+          })
+        }
+        
+        let labels = Object.keys(resultMapper);
+        let values = Object.keys(resultMapper).map((key) => {
+            return resultMapper[key]
+        })
+        let benfordsValues = [
+          maxData * .301,
+          maxData * .176,
+          maxData * .125,
+          maxData * .097,
+          maxData * .079,
+          maxData * .067,
+          maxData * .058,
+          maxData * .051,
+          maxData * .046
+        ]
+          var chartData = {
+              type: 'bar',
+              data: {
+                labels : labels,
+                datasets : [{
+                label: 'Flat File Data',
+                backgroundColor: "rgba(151,187,205,0.2)",
+                data : values,
+              },
+              {
+                label: 'Benford\'s Law Data',
+                data: benfordsValues,
+                type: 'line'
+              }
+              ],
+              options: {
+                scales: {
+                    yAxes: [{
+                        ticks: {
+                            beginAtZero: true,
+                            stepSize: maxData / 10
+                        }
+                    }],
+                },
+                responsive: true,
+                maintainAspectRatio: false,
+          }
+        }
+    }  
+          // get bar chart canvas
+          var myChartDom = document.getElementById("chart").getContext("2d");
+          var myChart = new Chart(myChartDom, chartData);
+
+          if(fileType === 'new' && resultMapper[1] !== 0) {
+            var datasetValues = Object.keys(resultMapper).map((key) => resultMapper[key]);
+            postData('http://localhost:5000/charts', {name: fileName, values: datasetValues})
+          }
+      }
+
+      async function postData(url = '', data = {}) {
+        // Default options are marked with *
+        fetch(url, {
+          method: 'POST', 
+          mode: 'cors', 
+          cache: 'no-cache', 
+          credentials: 'same-origin', 
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          redirect: 'follow', 
+          referrer: 'no-referrer', 
+          body: JSON.stringify(data) 
+        });
+       
+      }
+  </script>
